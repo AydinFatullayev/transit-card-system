@@ -1,0 +1,9 @@
+* text=auto
+
+# Скрипты для Linux ВСЕГДА должны оставаться с LF, иначе Docker их не запустит
+mvnw text eol=lf
+*.sh text eol=lf
+
+# Скрипты для Windows ВСЕГДА должны быть с CRLF
+*.cmd text eol=crlf
+*.bat text eol=crlf
