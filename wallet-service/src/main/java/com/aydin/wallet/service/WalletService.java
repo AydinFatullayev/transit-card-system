@@ -1,5 +1,6 @@
 package com.aydin.wallet.service;
 
+import com.aydin.wallet.client.PaymentClient;
 import com.aydin.wallet.dto.*;
 import com.aydin.wallet.entity.TransactionType;
 import com.aydin.wallet.entity.Wallet;
@@ -17,16 +18,20 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class WalletService {
 
-    private static final BigDecimal TRIP_PENALTY = new BigDecimal("0.20");
+    private static final BigDecimal TRIP_PENALTY =
+            new BigDecimal("0.20");
 
     private final WalletRepository walletRepository;
     private final WalletTransactionRepository walletTransactionRepository;
+    private final PaymentClient paymentClient;
 
     @Transactional
     public WalletResponse createWallet(CreateWalletRequest request) {
 
         if (walletRepository.existsByCardId(request.cardId())) {
-            throw new IllegalArgumentException("Wallet already exists for this card");
+            throw new IllegalArgumentException(
+                    "Wallet already exists for this card"
+            );
         }
 
         Wallet wallet = new Wallet(request.cardId());
@@ -44,7 +49,10 @@ public class WalletService {
     }
 
     @Transactional
-    public WalletResponse topUp(UUID cardId, AmountRequest request) {
+    public WalletResponse topUp(
+            UUID cardId,
+            AmountRequest request
+    ) {
 
         Wallet wallet = getWallet(cardId);
 
@@ -52,55 +60,77 @@ public class WalletService {
 
         walletRepository.save(wallet);
 
-        WalletTransaction transaction = new WalletTransaction(
-                wallet.getId(),
-                TransactionType.TOP_UP,
-                request.amount()
-        );
+        WalletTransaction transaction =
+                new WalletTransaction(
+                        wallet.getId(),
+                        TransactionType.TOP_UP,
+                        request.amount()
+                );
 
         walletTransactionRepository.save(transaction);
+
+        paymentClient.createPayment(
+                cardId,
+                "TOP_UP",
+                request.amount()
+        );
 
         return WalletResponse.fromEntity(wallet);
     }
 
     @Transactional
-    public WalletResponse withdraw(UUID cardId, AmountRequest request) {
+    public WalletResponse withdraw(
+            UUID cardId,
+            AmountRequest request
+    ) {
 
         Wallet wallet = getWallet(cardId);
 
-        checkSufficientBalance(wallet, request.amount());
+        checkSufficientBalance(
+                wallet,
+                request.amount()
+        );
 
         wallet.decreaseBalance(request.amount());
 
         walletRepository.save(wallet);
 
-        WalletTransaction transaction = new WalletTransaction(
-                wallet.getId(),
-                TransactionType.WITHDRAW,
-                request.amount()
-        );
+        WalletTransaction transaction =
+                new WalletTransaction(
+                        wallet.getId(),
+                        TransactionType.WITHDRAW,
+                        request.amount()
+                );
 
         walletTransactionRepository.save(transaction);
+
+        paymentClient.createPayment(
+                cardId,
+                "WITHDRAW",
+                request.amount()
+        );
 
         return WalletResponse.fromEntity(wallet);
     }
 
     @Transactional
-    public TransferResponse transfer(
-            UUID sourceCardId,
-            TransferRequest request
-    ) {
+    public TransferResponse transfer(UUID sourceCardId, TransferRequest request){
 
-        if (sourceCardId.equals(request.targetCardId())) {
+        UUID targetCardId = request.targetCardId();
+
+        if (sourceCardId.equals(targetCardId)) {
             throw new IllegalArgumentException(
                     "Source and target cards must be different"
             );
         }
 
         Wallet sourceWallet = getWallet(sourceCardId);
-        Wallet targetWallet = getWallet(request.targetCardId());
+        Wallet targetWallet = getWallet(targetCardId);
 
-        checkSufficientBalance(sourceWallet, request.amount());
+        checkSufficientBalance(
+                sourceWallet,
+                request.amount()
+        );
 
         sourceWallet.decreaseBalance(request.amount());
         targetWallet.increaseBalance(request.amount());
@@ -108,54 +138,81 @@ public class WalletService {
         walletRepository.save(sourceWallet);
         walletRepository.save(targetWallet);
 
-        WalletTransaction outgoingTransaction = new WalletTransaction(
-                sourceWallet.getId(),
-                TransactionType.TRANSFER_OUT,
+        WalletTransaction outgoingTransaction =
+                new WalletTransaction(
+                        sourceWallet.getId(),
+                        TransactionType.TRANSFER_OUT,
+                        request.amount()
+                );
+
+        WalletTransaction incomingTransaction =
+                new WalletTransaction(
+                        targetWallet.getId(),
+                        TransactionType.TRANSFER_IN,
+                        request.amount()
+                );
+
+        walletTransactionRepository.save(
+                outgoingTransaction
+        );
+
+        walletTransactionRepository.save(
+                incomingTransaction
+        );
+
+        paymentClient.createPayment(
+                sourceCardId,
+                "TRANSFER_OUT",
                 request.amount()
         );
 
-        WalletTransaction incomingTransaction = new WalletTransaction(
-                targetWallet.getId(),
-                TransactionType.TRANSFER_IN,
+        paymentClient.createPayment(
+                targetCardId,
+                "TRANSFER_IN",
                 request.amount()
         );
-
-        walletTransactionRepository.save(outgoingTransaction);
-        walletTransactionRepository.save(incomingTransaction);
 
         return new TransferResponse(
                 sourceCardId,
-                request.targetCardId(),
+                targetCardId,
                 request.amount(),
                 sourceWallet.getBalance()
         );
     }
+
     @Transactional
-    public WalletResponse chargeForTrip(UUID cardId, BigDecimal fare) {
+    public WalletResponse chargeForTrip(
+            UUID cardId,
+            BigDecimal fare
+    ) {
 
         Wallet wallet = getWallet(cardId);
 
         BigDecimal amountToCharge = fare;
 
-        /*
-         * Если денег недостаточно для поездки,
-         * добавляем штраф 0.20 AZN.
-         */
         if (wallet.getBalance().compareTo(fare) < 0) {
-            amountToCharge = fare.add(TRIP_PENALTY);
+            amountToCharge =
+                    fare.add(TRIP_PENALTY);
         }
 
         wallet.decreaseBalance(amountToCharge);
 
         walletRepository.save(wallet);
 
-        WalletTransaction transaction = new WalletTransaction(
-                wallet.getId(),
-                TransactionType.TRIP_PAYMENT,
-                amountToCharge
-        );
+        WalletTransaction transaction =
+                new WalletTransaction(
+                        wallet.getId(),
+                        TransactionType.TRIP_PAYMENT,
+                        amountToCharge
+                );
 
         walletTransactionRepository.save(transaction);
+
+        paymentClient.createPayment(
+                cardId,
+                "TRIP_PAYMENT",
+                amountToCharge
+        );
 
         return WalletResponse.fromEntity(wallet);
     }
@@ -165,7 +222,8 @@ public class WalletService {
         return walletRepository.findByCardId(cardId)
                 .orElseThrow(() ->
                         new IllegalArgumentException(
-                                "Wallet not found for card: " + cardId
+                                "Wallet not found for card: "
+                                        + cardId
                         )
                 );
     }

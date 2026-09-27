@@ -70,4 +70,14 @@ public class CardController {
                 cardService.blockCard(id)
         );
     }
+
+    @PatchMapping("/{id}/unblock")
+    public ResponseEntity<CardResponse> unblockCard(
+            @PathVariable UUID id
+    ) {
+
+        return ResponseEntity.ok(
+                cardService.unblockCard(id)
+        );
+    }
 }

@@ -4,16 +4,79 @@ services:
     image: postgres:18
     container_name: transit-postgres
     restart: unless-stopped
-
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-
     ports:
       - "5432:5432"
-
     volumes:
       - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+
+  card-service:
+    build: ./card-service
+    container_name: card-service
+    restart: unless-stopped
+    environment:
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+
+  payment-service:
+    build: ./payment-service
+    container_name: payment-service
+    restart: unless-stopped
+    environment:
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+    ports:
+      - "8084:8084"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+
+  wallet-service:
+    build: ./wallet-service
+    container_name: wallet-service
+    environment:
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      PAYMENT_SERVICE_URL: http://payment-service:8084
+    ports:
+      - "8083:8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      payment-service:
+        condition: service_started
+
+
+  trip-service:
+    build: ./trip-service
+    container_name: trip-service
+    environment:
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      WALLET_SERVICE_URL: http://wallet-service:8083
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      wallet-service:
+        condition: service_started
+
 
 volumes:
   postgres_data:

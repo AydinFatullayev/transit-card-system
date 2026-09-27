@@ -5,6 +5,7 @@ import com.aydin.card.dto.CreateCardRequest;
 import com.aydin.card.entity.Card;
 import com.aydin.card.entity.CardStatus;
 import com.aydin.card.repository.CardRepository;
+import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
@@ -81,6 +82,17 @@ public class CardService {
                 );
 
         card.setStatus(CardStatus.BLOCKED);
+
+        return CardResponse.fromEntity(cardRepository.save(card));
+    }
+
+    public @Nullable CardResponse unblockCard(UUID id) {
+        Card card = cardRepository.findById(id)
+                .orElseThrow(() ->
+                        new IllegalArgumentException("Card not found: " + id)
+                );
+
+        card.setStatus(CardStatus.ACTIVE);
 
         return CardResponse.fromEntity(cardRepository.save(card));
     }
